@@ -292,7 +292,7 @@ def parse_args():
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--max_model_len", type=int, default=None)
-    parser.add_argument("--val_n", type=int, default=6)
+    parser.add_argument("--val_n", type=int, default=12)
     args = parser.parse_args()
     if args.top_p is None:
         args.top_p = 0.95 if args.enable_thinking else 0.8

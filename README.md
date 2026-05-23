@@ -11,9 +11,7 @@ MRO-SI (Masked Route Optimization with Self-Imitation) trains a math reasoning m
 
 The masked route gives dense process-level supervision without exposing the requested final result. The verifier then adds sparse outcome-level calibration by selecting only correct student rollouts for self-imitation. The core training objective is:
 
-```text
-loss = masked_teacher_jsd(student_rollout) + lambda_si * nll(verified_correct_student_rollout)
-```
+![MRO-SI objective](assets/loss.png)
 
 Self-imitation is applied only after the configured start step, and only when the verifier confirms that the rollout's final boxed answer matches the reference.
 
@@ -39,6 +37,7 @@ MRO-SI/
     evaluate_math.py            # vLLM evaluation on MATH/AIME/HMMT style datasets
   assets/
     architecture.png
+    loss.png
     main_results.png
   accelerate.yaml
   requirements.txt
@@ -131,7 +130,7 @@ MROSI_SELF_IMITATION_START_STEP=75
 TOP_K_LOSS=200
 JSD_TOKEN_CLIP=0.05
 TRAIN_VLLM_GPU_MEMORY_UTILIZATION=0.4
-EVAL_VAL_N=4
+EVAL_VAL_N=12
 ```
 
 ## Evaluate
@@ -143,7 +142,7 @@ python eval/evaluate_math.py \
   --base_model /path/to/Qwen3-1.7B \
   --checkpoint_dir outputs/mrosi/<run_name>/checkpoint-100 \
   --dataset aime24 \
-  --val_n 4 \
+  --val_n 12 \
   --temperature 1.0 \
   --tensor_parallel_size 4 \
   --output_file eval_results/aime24_checkpoint100.json
