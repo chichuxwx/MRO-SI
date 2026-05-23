@@ -5,13 +5,21 @@ MRO-SI (Masked Route Optimization with Self-Imitation) trains a math reasoning m
 1. A masked-route fast channel: the teacher receives a derivation route whose final result is hidden, then distills token-level guidance to the student on student-generated rollouts.
 2. A verifier slow channel: once training is warm, student rollouts with a correct final boxed answer are used as positive self-imitation targets.
 
-This release is a cleaned standalone version of the `e13` experiments. Experimental branches such as dual-teacher mixing, source calibration, verified replay, AOMP certificates, slow-only SI, and plotting/logging artifacts were removed from the training entrypoint and trainer.
+## Method Overview
 
-## Figures
+![MRO-SI architecture](assets/architecture.png)
 
-![MRO-SI architecture](src/architecture.png)
+The masked route gives dense process-level supervision without exposing the requested final result. The verifier then adds sparse outcome-level calibration by selecting only correct student rollouts for self-imitation. The core training objective is:
 
-![MRO-SI results](src/result.png)
+```text
+loss = masked_teacher_jsd(student_rollout) + lambda_si * nll(verified_correct_student_rollout)
+```
+
+Self-imitation is applied only after the configured start step, and only when the verifier confirms that the rollout's final boxed answer matches the reference.
+
+## Main Results
+
+![MRO-SI main results](assets/main_results.png)
 
 ## Repository Layout
 
@@ -19,7 +27,7 @@ This release is a cleaned standalone version of the `e13` experiments. Experimen
 MRO-SI/
   mro_si/
     train.py                    # MRO-SI training entrypoint
-    trainer.py                  # cleaned MRO-SI trainer
+    trainer.py                  # MRO-SI trainer
     data_collator.py            # student and masked-teacher prompt builder
     masked_derivation_utils.py  # parsing, leakage checks, fallback masking
     verifier_utils.py           # boxed-answer extraction and verification
@@ -29,6 +37,9 @@ MRO-SI/
     run_mrosi_train_eval.sh             # train and evaluate checkpoints
   eval/
     evaluate_math.py            # vLLM evaluation on MATH/AIME/HMMT style datasets
+  assets/
+    architecture.png
+    main_results.png
   accelerate.yaml
   requirements.txt
 ```
@@ -101,7 +112,7 @@ Each generated hint is calibrated for JSON validity, `[OMITTED]` usage, prompt e
 
 ## Train MRO-SI
 
-The main run script mirrors the final E13/MRO-SI setting:
+Launch an MRO-SI training run:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
@@ -123,14 +134,6 @@ TRAIN_VLLM_GPU_MEMORY_UTILIZATION=0.4
 EVAL_VAL_N=4
 ```
 
-The cleaned trainer keeps the core objective:
-
-```text
-loss = masked_teacher_jsd(student_rollout) + lambda_si * nll(verified_correct_student_rollout)
-```
-
-Self-imitation is applied only after the configured start step, and only when the verifier confirms that the rollout's final boxed answer matches the reference.
-
 ## Evaluate
 
 Evaluate a LoRA checkpoint with vLLM:
@@ -147,10 +150,3 @@ python eval/evaluate_math.py \
 ```
 
 Supported dataset names in the bundled evaluator include `math500`, `aime24`, `aime25`, `hmmt25`, `minerva`, `amc23`, and `amo-bench`.
-
-## Notes
-
-- Checkpoints, datasets, logs, and WandB files are ignored by `.gitignore`.
-- `fixed_teacher=True` assumes LoRA training. The masked-route teacher is the frozen base model with LoRA adapters disabled.
-- The verifier first uses `math-verify`; if parsing fails, it falls back to normalized string matching.
-- The public folder intentionally excludes old experiment outputs, figures, WandB runs, and unrelated trainer branches.
