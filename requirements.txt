@@ -1,0 +1,12 @@
+accelerate
+datasets
+deepspeed
+math-verify
+peft
+safetensors
+torch
+tqdm
+transformers
+trl
+vllm
+wandb
