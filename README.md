@@ -7,6 +7,12 @@ MRO-SI (Masked Route Optimization with Self-Imitation) trains a math reasoning m
 
 This release is a cleaned standalone version of the `e13` experiments. Experimental branches such as dual-teacher mixing, source calibration, verified replay, AOMP certificates, slow-only SI, and plotting/logging artifacts were removed from the training entrypoint and trainer.
 
+## Figures
+
+![MRO-SI architecture](src/architecture.png)
+
+![MRO-SI results](src/result.png)
+
 ## Repository Layout
 
 ```text
