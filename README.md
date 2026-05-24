@@ -32,6 +32,7 @@ MRO-SI/
   scripts/
     build_masked_derivations.py         # create masked-route data
     prepare_math_train_minus_math500.py # optional MATH train preprocessing
+    run_full_pipeline.sh                # build masked data, train, and evaluate
     run_mrosi_train_eval.sh             # train and evaluate checkpoints
   eval/
     evaluate_math.py            # vLLM evaluation on MATH/AIME/HMMT style datasets
@@ -72,6 +73,25 @@ Optional fields:
   "masked_derivation_source": "generated"
 }
 ```
+
+## Full Pipeline
+
+Run the complete MRO-SI workflow from raw training data to post-training and evaluation:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+BASE_MODEL=/path/to/Qwen3-1.7B \
+MASK_GENERATOR_MODEL=/path/to/Qwen3-4B \
+RAW_DATASET=data/train.jsonl \
+MASKED_DATASET=data/train_masked.jsonl \
+MAX_STEPS=200 \
+EVAL_VAL_N=12 \
+bash scripts/run_full_pipeline.sh
+```
+
+The full pipeline script first builds `MASKED_DATASET` with `scripts/build_masked_derivations.py`, then launches MRO-SI post-training and checkpoint evaluation through `scripts/run_mrosi_train_eval.sh`.
+
+By default, `BUILD_MASKED_DATASET=auto`, so existing masked data is reused. Set `BUILD_MASKED_DATASET=true` to rebuild it, or `BUILD_MASKED_DATASET=false` to require an existing file.
 
 ## Build Masked Derivations
 
