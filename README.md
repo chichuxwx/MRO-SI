@@ -82,16 +82,14 @@ Run the complete MRO-SI workflow from raw training data to post-training and eva
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 BASE_MODEL=/path/to/Qwen3-1.7B \
 MASK_GENERATOR_MODEL=/path/to/Qwen3-4B \
-RAW_DATASET=data/train.jsonl \
-MASKED_DATASET=data/train_masked.jsonl \
 MAX_STEPS=200 \
 EVAL_VAL_N=12 \
 bash scripts/run_full_pipeline.sh
 ```
 
-The full pipeline script first builds `MASKED_DATASET` with `scripts/build_masked_derivations.py`, then launches MRO-SI post-training and checkpoint evaluation through `scripts/run_mrosi_train_eval.sh`.
+By default, the full pipeline reads the OpenThoughts math OPSD dataset `siyanzhao/Openthoughts_math_30k_opsd`, builds masked-route data at `data/openthoughts_math_30k_masked.jsonl`, then launches MRO-SI post-training and checkpoint evaluation through `scripts/run_mrosi_train_eval.sh`.
 
-By default, `BUILD_MASKED_DATASET=auto`, so existing masked data is reused. Set `BUILD_MASKED_DATASET=true` to rebuild it, or `BUILD_MASKED_DATASET=false` to require an existing file.
+`BUILD_MASKED_DATASET=auto` reuses existing masked data when the output file already exists. Set `BUILD_MASKED_DATASET=true` to rebuild it, or override `RAW_DATASET` and `RAW_DATASET_SPLIT` if you need to run on another Hugging Face dataset or a local JSON/JSONL file.
 
 ## Build Masked Derivations
 
@@ -99,11 +97,11 @@ Use a stronger local model through vLLM:
 
 ```bash
 python scripts/build_masked_derivations.py \
-  --dataset_name_or_path data/train.jsonl \
+  --dataset_name_or_path siyanzhao/Openthoughts_math_30k_opsd \
   --dataset_split train \
   --generation_backend vllm \
   --model_name_or_path /path/to/teacher-model \
-  --output_path data/train_masked.jsonl \
+  --output_path data/openthoughts_math_30k_masked.jsonl \
   --problem_column problem \
   --solution_column solution \
   --answer_column Answer \
@@ -120,10 +118,11 @@ export MASK_API_BASE_URL="https://your-api.example/v1"
 export MASK_API_KEY="..."
 
 python scripts/build_masked_derivations.py \
-  --dataset_name_or_path data/train.jsonl \
+  --dataset_name_or_path siyanzhao/Openthoughts_math_30k_opsd \
+  --dataset_split train \
   --generation_backend openai_api \
   --api_model qwen3-32b \
-  --output_path data/train_masked.jsonl \
+  --output_path data/openthoughts_math_30k_masked.jsonl \
   --resume
 ```
 
@@ -136,7 +135,7 @@ Launch an MRO-SI training run:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 BASE_MODEL=/path/to/Qwen3-1.7B \
-MASKED_DATASET=data/train_masked.jsonl \
+MASKED_DATASET=data/openthoughts_math_30k_masked.jsonl \
 MAX_STEPS=100 \
 MROSI_SELF_IMITATION_START_STEP=75 \
 bash scripts/run_mrosi_train_eval.sh
