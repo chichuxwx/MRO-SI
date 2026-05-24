@@ -26,14 +26,15 @@ bash scripts/run_full_pipeline.sh
 
 ## Masked 数据摘录
 
-如果需要展示 masked 数据结果，只截取 2 到 3 条样例，不提交完整数据集：
+已附带 3 条样例：
 
-```bash
-mkdir -p supplementary
-head -n 3 data/openthoughts_math_30k_masked.jsonl > supplementary/masked_data_excerpt.jsonl
-```
+- `supplementary/masked_data_excerpt.jsonl`
 
-摘录中建议保留 `problem`、`solution`、`masked_derivation`、`masked_derivation_passed`、`masked_derivation_source` 这几类字段，方便说明生成质量和过滤逻辑。
+该文件只保留必要字段，用于展示 masked-route 教师标注的形式；完整 masked 数据集不提交。
+
+本次摘录来自完整数据集中的 `source_index=18,58,118`，均满足 `masked_derivation_passed=true` 且 `masked_derivation_source=generated`。字段经过精简，保留 `problem`、`reference_answer`、`solution_excerpt`、`masked_derivation`、`masked_derivation_passed`、`masked_derivation_source`，方便说明生成质量和过滤逻辑。
+
+更多可复用实验产物与生成方式见 `supplementary/reusable_artifacts.md`。
 
 ## 不建议提交
 
