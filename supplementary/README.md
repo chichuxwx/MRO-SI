@@ -36,6 +36,16 @@ bash scripts/run_full_pipeline.sh
 
 更多可复用实验产物与生成方式见 `supplementary/reusable_artifacts.md`。
 
+## 结果摘要
+
+已附带以下轻量结果文件：
+
+- `supplementary/eval_summary.csv`：主实验结果摘要，来自已有 eval JSON 的汇总表。
+- `supplementary/length_error_bins_all.csv`：不同方法在生成长度分桶下的错误率统计。
+- `supplementary/leakage_check_summary.json`：训练集 masked 数据与评测题目的相似度检查摘要。
+- `supplementary/mrosi_vs_opsd_aime24_500_selected.csv`：AIME24 val@1 训练步数趋势摘要。
+- `supplementary/start_step_ablation.csv`：self-imitation 启动步数消融摘要。
+
 ## 不建议提交
 
 - 完整 `data/`、`outputs/`、`logs/`、`wandb/` 目录

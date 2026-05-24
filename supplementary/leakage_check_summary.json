@@ -1,0 +1,38 @@
+{
+  "source": "summarized from leakage_check_eval_vs_openthoughts_math_30k_masked_20260512.json",
+  "train_path": "OPSD/data/openthoughts_math_30k_masked.jsonl",
+  "eval_paths": {
+    "aime24": "OPSD/eval/eval_results/qwen3_1p7b_100step_mask_self_imitation_delay75_v0_masked_derivation_aime24_valn12.json",
+    "aime25": "OPSD/eval/eval_results/qwen3_1p7b_100step_mask_self_imitation_delay75_v0_masked_derivation_aime25_valn12.json",
+    "hmmt25": "OPSD/eval/eval_results/qwen3_1p7b_100step_mask_self_imitation_delay75_v0_masked_derivation_hmmt25_valn12.json"
+  },
+  "dataset_summary": {
+    "aime24": {
+      "max_combined": 0.6001,
+      "max_seq_ratio": 0.7557,
+      "max_token_jaccard": 0.4878,
+      "max_char5_jaccard": 0.36,
+      "contains_count": 0,
+      "suspicious_ge_0_80": 0,
+      "moderate_ge_0_60": 1
+    },
+    "aime25": {
+      "max_combined": 0.7826,
+      "max_seq_ratio": 0.8684,
+      "max_token_jaccard": 0.8,
+      "max_char5_jaccard": 0.5797,
+      "contains_count": 0,
+      "suspicious_ge_0_80": 0,
+      "moderate_ge_0_60": 1
+    },
+    "hmmt25": {
+      "max_combined": 0.5877,
+      "max_seq_ratio": 0.7196,
+      "max_token_jaccard": 0.5517,
+      "max_char5_jaccard": 0.3558,
+      "contains_count": 0,
+      "suspicious_ge_0_80": 0,
+      "moderate_ge_0_60": 0
+    }
+  }
+}
