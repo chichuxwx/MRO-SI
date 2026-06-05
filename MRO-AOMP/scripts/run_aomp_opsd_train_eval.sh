@@ -5,17 +5,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 MROSI_ROOT="${MROSI_ROOT:-$ROOT_DIR/..}"
-BASE_MODEL="${BASE_MODEL:-../../models/Qwen3-1.7B}"
+MROSI_ROOT="$(cd "$MROSI_ROOT" && pwd)"
+BASE_MODEL="${BASE_MODEL:-$MROSI_ROOT/../models/Qwen3-1.7B}"
 MASKED_DATASET="${MASKED_DATASET:-$MROSI_ROOT/openthoughts_math_30k_masked.jsonl}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/aomp_opsd}"
 EVAL_OUTPUT_ROOT="${EVAL_OUTPUT_ROOT:-eval_results}"
 WANDB_PROJECT="${WANDB_PROJECT:-AOMP-OPSD}"
-ACCELERATE_CONFIG="${ACCELERATE_CONFIG:-$MROSI_ROOT/accelerate.yaml}"
+ACCELERATE_CONFIG="${ACCELERATE_CONFIG:-$ROOT_DIR/configs/accelerate_8gpu_ddp.yaml}"
 
-MAX_STEPS="${MAX_STEPS:-200}"
+MAX_STEPS="${MAX_STEPS:-100}"
 SAVE_STEPS="${SAVE_STEPS:-25}"
 LEARNING_RATE="${LEARNING_RATE:-5e-6}"
-MAX_COMPLETION_LENGTH="${MAX_COMPLETION_LENGTH:-1024}"
+MAX_COMPLETION_LENGTH="${MAX_COMPLETION_LENGTH:-256}"
 TOP_K_LOSS="${TOP_K_LOSS:-200}"
 JSD_TOKEN_CLIP="${JSD_TOKEN_CLIP:-0.05}"
 
@@ -23,7 +24,7 @@ AOMP_OPSD_VARIANT="${AOMP_OPSD_VARIANT:-full_aomp_opsd}"
 AOMP_OPSD_ENABLED="${AOMP_OPSD_ENABLED:-true}"
 AOMP_OPSD_STEP_SIZE="${AOMP_OPSD_STEP_SIZE:-1.0}"
 AOMP_OPSD_LOOKAHEAD_LR="${AOMP_OPSD_LOOKAHEAD_LR:-1.0e-5}"
-AOMP_OPSD_GROUP_SIZE="${AOMP_OPSD_GROUP_SIZE:-4}"
+AOMP_OPSD_GROUP_SIZE="${AOMP_OPSD_GROUP_SIZE:-2}"
 AOMP_OPSD_AUDIT_SOURCE="${AOMP_OPSD_AUDIT_SOURCE:-auto}"
 AOMP_OPSD_AUDIT_TEMPERATURE="${AOMP_OPSD_AUDIT_TEMPERATURE:-1.0}"
 AOMP_OPSD_POSITIVE_PATH_WEIGHT="${AOMP_OPSD_POSITIVE_PATH_WEIGHT:-1.0}"
@@ -38,22 +39,29 @@ AOMP_OPSD_PREFIX_DECAY_LAMBDA="${AOMP_OPSD_PREFIX_DECAY_LAMBDA:-1.0}"
 AOMP_OPSD_MAX_TOKEN_WEIGHT="${AOMP_OPSD_MAX_TOKEN_WEIGHT:-5.0}"
 AOMP_OPSD_MIN_TOKEN_WEIGHT="${AOMP_OPSD_MIN_TOKEN_WEIGHT:-0.0}"
 AOMP_OPSD_AUDIT_BUDGET="${AOMP_OPSD_AUDIT_BUDGET:-0}"
-AOMP_OPSD_AUDIT_EVERY_N_STEPS="${AOMP_OPSD_AUDIT_EVERY_N_STEPS:-1}"
+AOMP_OPSD_AUDIT_START_STEP="${AOMP_OPSD_AUDIT_START_STEP:-0}"
+AOMP_OPSD_AUDIT_EVERY_N_STEPS="${AOMP_OPSD_AUDIT_EVERY_N_STEPS:-2}"
+AOMP_OPSD_VLLM_APPROX_LOOKAHEAD="${AOMP_OPSD_VLLM_APPROX_LOOKAHEAD:-false}"
 AOMP_OPSD_LOG_DIAGNOSTICS="${AOMP_OPSD_LOG_DIAGNOSTICS:-true}"
 
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 if [[ -z "${NUM_PROCESSES:-}" ]]; then
     IFS=',' read -r -a _visible_gpus <<< "$CUDA_VISIBLE_DEVICES"
     NUM_PROCESSES="${#_visible_gpus[@]}"
 fi
-PER_DEVICE_TRAIN_BATCH_SIZE="${PER_DEVICE_TRAIN_BATCH_SIZE:-4}"
-TRAIN_GRAD_ACCUM="${TRAIN_GRAD_ACCUM:-2}"
+PER_DEVICE_TRAIN_BATCH_SIZE="${PER_DEVICE_TRAIN_BATCH_SIZE:-1}"
+TRAIN_GRAD_ACCUM="${TRAIN_GRAD_ACCUM:-8}"
 TRAIN_MAIN_PROCESS_PORT="${TRAIN_MAIN_PROCESS_PORT:-12959}"
 TRAIN_VLLM_GPU_MEMORY_UTILIZATION="${TRAIN_VLLM_GPU_MEMORY_UTILIZATION:-0.4}"
+TRAIN_USE_VLLM="${TRAIN_USE_VLLM:-true}"
+TRAIN_VLLM_MODE="${TRAIN_VLLM_MODE:-colocate}"
+TRAIN_VLLM_TENSOR_PARALLEL_SIZE="${TRAIN_VLLM_TENSOR_PARALLEL_SIZE:-1}"
+TRAIN_VLLM_SYNC_FREQUENCY="${TRAIN_VLLM_SYNC_FREQUENCY:-1}"
+SHUFFLE_DATASET="${SHUFFLE_DATASET:-true}"
 
 RUN_CONFIG="${RUN_CONFIG:-qwen3_1p7b_${AOMP_OPSD_VARIANT}_${MAX_STEPS}step}"
 RUN_TRAIN="${RUN_TRAIN:-true}"
-RUN_EVAL="${RUN_EVAL:-false}"
+RUN_EVAL="${RUN_EVAL:-true}"
 ALLOW_EXISTING_RUN="${ALLOW_EXISTING_RUN:-false}"
 
 EVAL_DATASETS="${EVAL_DATASETS:-aime24 aime25 hmmt25}"
@@ -102,6 +110,17 @@ echo "train GPUs       : $CUDA_VISIBLE_DEVICES (processes=$NUM_PROCESSES, grad_a
 echo "================================================================================"
 
 if [[ "$RUN_TRAIN" == "true" || "$RUN_TRAIN" == "1" ]]; then
+    TRAIN_VLLM_ARGS=()
+    if [[ "$TRAIN_USE_VLLM" == "true" || "$TRAIN_USE_VLLM" == "1" ]]; then
+        TRAIN_VLLM_ARGS=(
+            --use_vllm
+            --vllm_mode "$TRAIN_VLLM_MODE"
+            --vllm_gpu_memory_utilization "$TRAIN_VLLM_GPU_MEMORY_UTILIZATION"
+            --vllm_tensor_parallel_size "$TRAIN_VLLM_TENSOR_PARALLEL_SIZE"
+            --vllm_sync_frequency "$TRAIN_VLLM_SYNC_FREQUENCY"
+        )
+    fi
+
     MROSI_ROOT="$MROSI_ROOT" \
     PYTHONPATH="$ROOT_DIR:$MROSI_ROOT:${PYTHONPATH:-}" \
     CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" \
@@ -120,7 +139,7 @@ if [[ "$RUN_TRAIN" == "true" || "$RUN_TRAIN" == "1" ]]; then
         --learning_rate "$LEARNING_RATE" \
         --max_grad_norm 0.1 \
         --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \
-        --gradient_checkpointing \
+        --ddp_find_unused_parameters false \
         --gradient_accumulation_steps "$TRAIN_GRAD_ACCUM" \
         --output_dir "$OUTPUT_ROOT" \
         --run_config "$RUN_CONFIG" \
@@ -130,6 +149,7 @@ if [[ "$RUN_TRAIN" == "true" || "$RUN_TRAIN" == "1" ]]; then
         --logging_steps 1 \
         --max_length 20000 \
         --max_completion_length "$MAX_COMPLETION_LENGTH" \
+        --shuffle_dataset "$SHUFFLE_DATASET" \
         --attn_implementation flash_attention_2 \
         --torch_dtype bfloat16 \
         --beta 0 \
@@ -144,6 +164,7 @@ if [[ "$RUN_TRAIN" == "true" || "$RUN_TRAIN" == "1" ]]; then
         --top_k_loss "$TOP_K_LOSS" \
         --jsd_token_clip "$JSD_TOKEN_CLIP" \
         --wandb_project "$WANDB_PROJECT" \
+        "${TRAIN_VLLM_ARGS[@]}" \
         --aomp_opsd_enabled "$AOMP_OPSD_ENABLED" \
         --variant "$AOMP_OPSD_VARIANT" \
         --step_size "$AOMP_OPSD_STEP_SIZE" \
@@ -163,7 +184,9 @@ if [[ "$RUN_TRAIN" == "true" || "$RUN_TRAIN" == "1" ]]; then
         --max_token_weight "$AOMP_OPSD_MAX_TOKEN_WEIGHT" \
         --min_token_weight "$AOMP_OPSD_MIN_TOKEN_WEIGHT" \
         --audit_budget "$AOMP_OPSD_AUDIT_BUDGET" \
+        --audit_start_step "$AOMP_OPSD_AUDIT_START_STEP" \
         --audit_every_n_steps "$AOMP_OPSD_AUDIT_EVERY_N_STEPS" \
+        --vllm_approx_lookahead "$AOMP_OPSD_VLLM_APPROX_LOOKAHEAD" \
         --log_diagnostics "$AOMP_OPSD_LOG_DIAGNOSTICS" \
         2>&1 | tee "logs/${RUN_CONFIG}_train_$(date +%Y%m%d_%H%M%S).log"
 fi

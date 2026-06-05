@@ -22,6 +22,7 @@ class OutcomeCalibratedLossConfig:
     min_token_weight: float = 0.0
     uniform_token_weights: bool = False
     temperature: float = 1.0
+    top_k_loss: int | None = 200
 
 
 def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -58,15 +59,32 @@ def compute_group_advantages(
     return advantages
 
 
-def compute_student_entropy(logits: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
+def _topk_logits(logits: torch.Tensor, top_k: int | None) -> torch.Tensor:
+    if top_k is None or top_k <= 0 or top_k >= logits.size(-1):
+        return logits
+    k = min(int(top_k), logits.size(-1))
+    values, _ = torch.topk(logits, k=k, dim=-1)
+    return values
+
+
+def compute_student_entropy(
+    logits: torch.Tensor,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+) -> torch.Tensor:
+    logits = _topk_logits(logits, top_k)
     scaled = logits / max(float(temperature), 1e-8)
     log_probs = F.log_softmax(scaled, dim=-1)
     probs = log_probs.exp()
     return -(probs * log_probs).sum(dim=-1)
 
 
-def compute_teacher_entropy(teacher_logits: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
-    return compute_student_entropy(teacher_logits.detach(), temperature=temperature)
+def compute_teacher_entropy(
+    teacher_logits: torch.Tensor,
+    temperature: float = 1.0,
+    top_k: int | None = None,
+) -> torch.Tensor:
+    return compute_student_entropy(teacher_logits.detach(), temperature=temperature, top_k=top_k)
 
 
 def compute_token_kl(
@@ -74,11 +92,17 @@ def compute_token_kl(
     student_logits: torch.Tensor,
     mask: torch.Tensor | None = None,
     temperature: float = 1.0,
+    top_k: int | None = None,
 ) -> torch.Tensor:
     """Per-token forward KL, KL(teacher || student)."""
 
     temperature = max(float(temperature), 1e-8)
-    teacher_log_probs = F.log_softmax(teacher_logits.detach() / temperature, dim=-1)
+    teacher_logits = teacher_logits.detach()
+    if top_k is not None and top_k > 0 and top_k < teacher_logits.size(-1):
+        k = min(int(top_k), teacher_logits.size(-1))
+        teacher_logits, topk_indices = torch.topk(teacher_logits, k=k, dim=-1)
+        student_logits = torch.gather(student_logits, dim=-1, index=topk_indices)
+    teacher_log_probs = F.log_softmax(teacher_logits / temperature, dim=-1)
     student_log_probs = F.log_softmax(student_logits / temperature, dim=-1)
     teacher_probs = teacher_log_probs.exp()
     token_kl = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(dim=-1)
@@ -193,18 +217,27 @@ def compute_outcome_calibrated_opsd_loss(
 
     temperature = max(float(config.temperature), 1e-8)
     safe_ids = sampled_token_ids.masked_fill(~mask_bool, 0)
-    student_log_probs = F.log_softmax(student_logits / temperature, dim=-1)
-    sampled_log_probs = torch.gather(student_log_probs, dim=-1, index=safe_ids.unsqueeze(-1)).squeeze(-1)
-    nll = -sampled_log_probs
+    scaled_student_logits = student_logits / temperature
+    sampled_logits = torch.gather(scaled_student_logits, dim=-1, index=safe_ids.unsqueeze(-1)).squeeze(-1)
+    nll = torch.logsumexp(scaled_student_logits, dim=-1) - sampled_logits
 
     token_kl = compute_token_kl(
         teacher_logits=teacher_logits.detach(),
         student_logits=student_logits,
         mask=mask_bool,
         temperature=temperature,
+        top_k=config.top_k_loss,
     )
-    student_entropy = compute_student_entropy(student_logits, temperature=temperature) * mask_f
-    teacher_entropy = compute_teacher_entropy(teacher_logits.detach(), temperature=temperature) * mask_f
+    student_entropy = compute_student_entropy(
+        student_logits,
+        temperature=temperature,
+        top_k=config.top_k_loss,
+    ) * mask_f
+    teacher_entropy = compute_teacher_entropy(
+        teacher_logits.detach(),
+        temperature=temperature,
+        top_k=config.top_k_loss,
+    ) * mask_f
     prefix_reliability = compute_prefix_reliability(mask_bool, lambda_decay=config.prefix_decay_lambda)
 
     if config.uniform_token_weights:

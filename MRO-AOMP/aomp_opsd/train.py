@@ -23,7 +23,8 @@ from trl import (
 )
 from trl.experimental.gold import GOLDConfig
 
-from aomp_opsd.mrosi_compat import ensure_mrosi_on_path
+from aomp_opsd.data_collator import AOMPOPSDDataCollator
+from aomp_opsd.mrosi_compat import ensure_mrosi_on_path, mrosi_root
 from aomp_opsd.trainer import AOMPOPSDTrainer
 
 
@@ -60,7 +61,7 @@ class AOMPOPSDScriptArguments(ScriptArguments):
     student_thinking: bool = field(default=False, metadata={"help": "Enable thinking mode in student rollouts."})
     teacher_thinking: bool = field(default=True, metadata={"help": "Enable thinking mode in masked-teacher prompts."})
     dataset_name_or_path: str = field(
-        default="../MRO-SI/openthoughts_math_30k_masked.jsonl",
+        default_factory=lambda: str(mrosi_root() / "openthoughts_math_30k_masked.jsonl"),
         metadata={"help": "HF dataset name or local JSON/JSONL with problem, solution, masked_derivation."},
     )
     dataset_split: str = field(default="train", metadata={"help": "Dataset split for HF datasets."})
@@ -94,7 +95,20 @@ class AOMPOPSDScriptArguments(ScriptArguments):
     max_token_weight: float = field(default=5.0)
     min_token_weight: float = field(default=0.0)
     audit_budget: int = field(default=0)
+    audit_start_step: int = field(
+        default=0,
+        metadata={"help": "Global step before which audit is skipped and proxy OPSD training is used."},
+    )
     audit_every_n_steps: int = field(default=1)
+    vllm_approx_lookahead: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "When --use_vllm is enabled, skip temporary exact-lookahead rollout "
+                "and audit the current-policy vLLM rollout instead."
+            )
+        },
+    )
     log_diagnostics: bool = field(default=True)
     advantage_clip_range: float = field(default=5.0)
     compute_grad_cosine: bool = field(
@@ -141,6 +155,8 @@ def _validate_args(script_args, training_args, model_args) -> None:
         raise ValueError("group_size must be positive.")
     if script_args.audit_every_n_steps <= 0:
         raise ValueError("audit_every_n_steps must be positive.")
+    if script_args.audit_start_step < 0:
+        raise ValueError("audit_start_step must be non-negative.")
     if script_args.min_token_weight > script_args.max_token_weight:
         raise ValueError("min_token_weight must be <= max_token_weight.")
     if script_args.lookahead_lr < 0:
@@ -196,6 +212,7 @@ def main():
                 "lookahead_lr": script_args.lookahead_lr,
                 "group_size": script_args.group_size,
                 "audit_source": script_args.audit_source,
+                "audit_start_step": script_args.audit_start_step,
                 "audit_temperature": script_args.audit_temperature,
                 "positive_path_weight": script_args.positive_path_weight,
                 "negative_path_weight": script_args.negative_path_weight,
@@ -207,6 +224,21 @@ def main():
                 "use_prefix_reliability": script_args.use_prefix_reliability,
             },
         )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_args.model_name_or_path,
+        revision=model_args.model_revision,
+        trust_remote_code=model_args.trust_remote_code,
+        padding_side="left",
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    training_args.presence_penalty = script_args.presence_penalty
+    training_args.remove_unused_columns = False
+    if script_args.aomp_opsd_enabled:
+        training_args.gradient_checkpointing = False
+        training_args.gradient_checkpointing_kwargs = None
 
     model_dtype = _resolve_torch_dtype(model_args)
     model_kwargs = dict(
@@ -222,17 +254,6 @@ def main():
         model_kwargs["quantization_config"] = quantization_config
     training_args.model_init_kwargs = model_kwargs
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path,
-        revision=model_args.model_revision,
-        trust_remote_code=model_args.trust_remote_code,
-        padding_side="left",
-    )
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    training_args.presence_penalty = script_args.presence_penalty
-    training_args.remove_unused_columns = False
     dataset_kwargs = dict(getattr(training_args, "dataset_kwargs", None) or {})
     dataset_kwargs.setdefault("skip_prepare_dataset", True)
     training_args.dataset_kwargs = dataset_kwargs
@@ -250,6 +271,13 @@ def main():
     trainer = AOMPOPSDTrainer(
         model=model_args.model_name_or_path,
         args=training_args,
+        data_collator=AOMPOPSDDataCollator(
+            tokenizer=tokenizer,
+            max_length=training_args.max_length,
+            student_thinking=script_args.student_thinking,
+            teacher_thinking=script_args.teacher_thinking,
+            masked_derivation_column=script_args.masked_derivation_column,
+        ),
         train_dataset=train_dataset,
         eval_dataset=None,
         processing_class=tokenizer,
@@ -284,7 +312,9 @@ def main():
         max_token_weight=script_args.max_token_weight,
         min_token_weight=script_args.min_token_weight,
         audit_budget=script_args.audit_budget,
+        audit_start_step=script_args.audit_start_step,
         audit_every_n_steps=script_args.audit_every_n_steps,
+        vllm_approx_lookahead=script_args.vllm_approx_lookahead,
         log_diagnostics=script_args.log_diagnostics,
         advantage_clip_range=script_args.advantage_clip_range,
         compute_grad_cosine=script_args.compute_grad_cosine,

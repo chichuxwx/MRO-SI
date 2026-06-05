@@ -66,7 +66,9 @@ class AOMPOPSDTrainer(MROSITrainer):
         max_token_weight: float = 5.0,
         min_token_weight: float = 0.0,
         audit_budget: int = 0,
+        audit_start_step: int = 0,
         audit_every_n_steps: int = 1,
+        vllm_approx_lookahead: bool = False,
         log_diagnostics: bool = True,
         advantage_clip_range: float = 5.0,
         compute_grad_cosine: bool = False,
@@ -92,7 +94,9 @@ class AOMPOPSDTrainer(MROSITrainer):
         self.max_token_weight = float(max_token_weight)
         self.min_token_weight = float(min_token_weight)
         self.audit_budget = max(0, int(audit_budget))
+        self.audit_start_step = max(0, int(audit_start_step))
         self.audit_every_n_steps = max(1, int(audit_every_n_steps))
+        self.vllm_approx_lookahead = bool(vllm_approx_lookahead)
         self.log_diagnostics = bool(log_diagnostics)
         self.advantage_clip_range = float(advantage_clip_range)
         self.compute_grad_cosine = bool(compute_grad_cosine)
@@ -119,11 +123,14 @@ class AOMPOPSDTrainer(MROSITrainer):
         print(f"lookahead_lr: {self.lookahead_lr}")
         print(f"group_size: {self.group_size}")
         print(f"audit_source: {self.audit_source}")
+        print(f"audit_start_step: {self.audit_start_step}")
         print(f"audit_every_n_steps: {self.audit_every_n_steps}")
+        print(f"vllm_approx_lookahead: {self.vllm_approx_lookahead}")
         print("=" * 80 + "\n")
 
     def _audit_is_scheduled(self) -> bool:
-        return (int(self.state.global_step) % self.audit_every_n_steps) == 0
+        step = int(self.state.global_step)
+        return step >= self.audit_start_step and (step % self.audit_every_n_steps) == 0
 
     def _loss_config(self, uniform_token_weights: bool) -> OutcomeCalibratedLossConfig:
         return OutcomeCalibratedLossConfig(
@@ -141,6 +148,7 @@ class AOMPOPSDTrainer(MROSITrainer):
             min_token_weight=self.min_token_weight,
             uniform_token_weights=uniform_token_weights,
             temperature=self.temperature,
+            top_k_loss=self.top_k_loss,
         )
 
     def _expand_for_group(self, inputs: dict[str, Any], group_size: int) -> tuple[dict[str, Any], torch.Tensor]:
@@ -190,20 +198,43 @@ class AOMPOPSDTrainer(MROSITrainer):
         model: nn.Module,
         inputs: dict[str, Any],
         group_size: int = 1,
+        force_transformers: bool = False,
     ) -> tuple[dict[str, Any], list[str], list[str], torch.Tensor]:
         rollout_inputs, group_ids = self._expand_for_group(inputs, group_size)
 
-        # AOMP lookahead uses temporary parameters that vLLM does not know about,
-        # so this experimental trainer uses transformers generation for AOMP paths.
-        with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
-            generated_ids, generated_attention_mask, _ = self.generate_on_policy_outputs(
-                unwrapped_model,
+        if getattr(self, "use_vllm", False) and not force_transformers:
+            self._wake_vllm_if_needed()
+            (
+                generated_ids,
+                generated_attention_mask,
+                _,
+                prompt_texts,
+                completion_texts,
+                student_prompt_len,
+                prompt_lengths,
+            ) = self._generate_on_policy_outputs_vllm(
                 rollout_inputs,
                 self.generation_config,
                 self.processing_class.pad_token_id,
             )
+            rollout_inputs["student_prompt_length"] = student_prompt_len
+            rollout_inputs["student_prompt_lengths_per_example"] = prompt_lengths
+        else:
+            with unwrap_model_for_generation(model, self.accelerator) as unwrapped_model:
+                generated_ids, generated_attention_mask, _ = self.generate_on_policy_outputs(
+                    unwrapped_model,
+                    rollout_inputs,
+                    self.generation_config,
+                    self.processing_class.pad_token_id,
+                )
+            student_prompt_len = rollout_inputs["student_prompt_length"]
+            prompt_texts = self.processing_class.batch_decode(
+                rollout_inputs["student_prompts"],
+                skip_special_tokens=False,
+            )
+            completion_ids = generated_ids[:, student_prompt_len:]
+            completion_texts = self.processing_class.batch_decode(completion_ids, skip_special_tokens=False)
 
-        student_prompt_len = rollout_inputs["student_prompt_length"]
         generation_ids = generated_ids[:, student_prompt_len:]
         rollout_inputs["student_input_ids"] = generated_ids
         rollout_inputs["student_attention_mask"] = generated_attention_mask
@@ -216,20 +247,11 @@ class AOMPOPSDTrainer(MROSITrainer):
         rollout_inputs["teacher_attention_mask"] = teacher_attention_mask
 
         labels = generated_ids.clone()
-        lengths = rollout_inputs["student_prompt_lengths_per_example"]
-        for row_idx in range(labels.shape[0]):
-            actual_prompt_len = int(lengths[row_idx].item())
-            labels[row_idx, :actual_prompt_len] = -100
+        labels[:, :student_prompt_len] = -100
         if self.processing_class.pad_token_id is not None:
             labels[labels == self.processing_class.pad_token_id] = -100
         rollout_inputs["labels"] = labels
 
-        prompt_texts = self.processing_class.batch_decode(
-            rollout_inputs["student_prompts"],
-            skip_special_tokens=False,
-        )
-        completion_ids = generated_ids[:, student_prompt_len:]
-        completion_texts = self.processing_class.batch_decode(completion_ids, skip_special_tokens=False)
         return rollout_inputs, prompt_texts, completion_texts, group_ids
 
     @staticmethod
@@ -368,9 +390,18 @@ class AOMPOPSDTrainer(MROSITrainer):
             proxy.student_logits,
             mask=mask,
             temperature=self.temperature,
+            top_k=self.top_k_loss,
         )
-        student_entropy = compute_student_entropy(proxy.student_logits, temperature=self.temperature)
-        teacher_entropy = compute_teacher_entropy(proxy.teacher_logits.detach(), temperature=self.temperature)
+        student_entropy = compute_student_entropy(
+            proxy.student_logits,
+            temperature=self.temperature,
+            top_k=self.top_k_loss,
+        )
+        teacher_entropy = compute_teacher_entropy(
+            proxy.teacher_logits.detach(),
+            temperature=self.temperature,
+            top_k=self.top_k_loss,
+        )
         mask_f = mask.to(dtype=token_kl.dtype)
         denom = mask_f.sum().clamp_min(1.0)
         self._record_metric("proxy_opsd_loss", float(proxy.loss.detach().item()))
@@ -528,6 +559,8 @@ class AOMPOPSDTrainer(MROSITrainer):
         self._record_metric("hint_lookahead_cosine", 0.0)  # TODO: compute behind compute_grad_cosine when needed.
 
         exact_lookahead = is_lookahead_safe(self)
+        if getattr(self, "use_vllm", False) and self.vllm_approx_lookahead:
+            exact_lookahead = False
         uniform_weights = self.variant == "aomp_uniform"
 
         if exact_lookahead:
@@ -536,6 +569,7 @@ class AOMPOPSDTrainer(MROSITrainer):
                     model,
                     inputs,
                     group_size=self.group_size,
+                    force_transformers=getattr(self, "use_vllm", False),
                 )
                 rollout_inputs, group_ids, prompt_texts, completion_texts = self._slice_batch(
                     rollout_inputs,
