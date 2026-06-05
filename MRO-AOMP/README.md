@@ -1,7 +1,6 @@
 # AOMP-OPSD
 
-This is an independent experimental method directory inside MRO-SI. It does not
-modify the original `mro_si` implementation; it imports MRO-SI utilities
+This is an independent experimental method directory inside MRO-SI. It imports MRO-SI utilities
 read-only for prompt building, teacher scoring shape, and boxed-answer
 verification.
 
@@ -42,12 +41,6 @@ especially uncertain tokens. Negative outcome trajectories use teacher KL to
 correct the student, especially where teacher/student disagreement is large,
 the teacher is confident, and the prefix is still reliable.
 
-The central claim is:
-
-```text
-Outcome signal is not a token reward;
-it is a calibration signal for token-level distillation.
-```
 
 ## Variants
 
@@ -56,10 +49,8 @@ it is a calibration signal for token-level distillation.
 - `aomp_uniform`: AOMP two-step and outcome routing, but uniform token weights.
 - `full_aomp_opsd`: lookahead, routing, student uncertainty, teacher reliability, and prefix reliability.
 
-## Diagrams
-
-- `aomp architecture.png`: presentation architecture figure.
-- `docs/aomp_opsd_flow.svg`: editable method flow figure.
+## Architecture
+![MRO-AOMP main architecture](MRO-AOMP/aomp architecture.png)
 
 ## Run
 
@@ -82,30 +73,4 @@ Full AOMP-OPSD:
 ```bash
 cd /Users/chichu/Desktop/code/h100/MRO-SI/MRO-AOMP
 AOMP_OPSD_VARIANT=full_aomp_opsd bash scripts/run_aomp_opsd_train_eval.sh
-```
-
-Small dry-run example:
-
-```bash
-cd /Users/chichu/Desktop/code/h100/MRO-SI/MRO-AOMP
-MAX_STEPS=1 SAVE_STEPS=1 PER_DEVICE_TRAIN_BATCH_SIZE=1 TRAIN_GRAD_ACCUM=1 \
-AOMP_OPSD_GROUP_SIZE=2 RUN_EVAL=false \
-bash scripts/run_aomp_opsd_train_eval.sh
-```
-
-## Approximations
-
-- The prox step is implemented in trainable-parameter space as
-  `p <- p - eta * grad`; it is not a strict policy KL trust-region prox.
-- When temporary parameter swaps are unsafe, such as ZeRO-3 or FSDP in v1, the
-  trainer falls back to recomputing the audited loss on `z_t` using the same
-  rollout batch.
-- The sequence-level verifier is a controlled-bias outcome-calibrated estimator,
-  not an unbiased oracle for the exact theorem assumptions.
-
-## Tests
-
-```bash
-cd /Users/chichu/Desktop/code/h100/MRO-SI/MRO-AOMP
-python -m unittest discover -s tests -p 'test_aomp_opsd*.py'
 ```
