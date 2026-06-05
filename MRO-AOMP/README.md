@@ -50,8 +50,7 @@ the teacher is confident, and the prefix is still reliable.
 - `full_aomp_opsd`: lookahead, routing, student uncertainty, teacher reliability, and prefix reliability.
 
 ## Architecture
-![MRO-AOMP main architecture](MRO-AOMP/aomp architecture.png)
-
+![MRO-AOMP main architecture](./aomp%20architecture.png)
 ## Run
 
 Original MRO-SI remains unchanged:
