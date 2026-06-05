@@ -1,0 +1,41 @@
+aomp_opsd:
+  enabled: true
+  variant: full_aomp_opsd
+  step_size: 1.0
+  lookahead_lr: 1.0e-5
+  group_size: 4
+  audit_source: auto
+  audit_temperature: 1.0
+  positive_path_weight: 1.0
+  negative_path_weight: 1.0
+  teacher_kl_weight: 1.0
+  self_distill_weight: 1.0
+  token_weight_normalization: sequence_sum
+  use_teacher_reliability: true
+  use_student_uncertainty: true
+  use_prefix_reliability: true
+  prefix_decay_lambda: 1.0
+  max_token_weight: 5.0
+  min_token_weight: 0.0
+  audit_budget: 0
+  audit_every_n_steps: 1
+  log_diagnostics: true
+  advantage_clip_range: 5.0
+  compute_grad_cosine: false
+
+ablations:
+  vanilla_opsd:
+    variant: vanilla_opsd
+    enabled: false
+  outcome_weighted_opsd:
+    variant: outcome_weighted_opsd
+    enabled: true
+  aomp_without_token_reliability:
+    variant: aomp_uniform
+    enabled: true
+    use_teacher_reliability: false
+    use_student_uncertainty: false
+    use_prefix_reliability: false
+  full_aomp_opsd:
+    variant: full_aomp_opsd
+    enabled: true
